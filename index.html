@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Balance Refresher</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles/styles.css">
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <i class="fas fa-file-invoice-dollar"></i>
+            <h1>Invoice Balance Refresher</h1>
+        </div>
+        <p class="tagline">Efficiently manage and update your invoice balances</p>
+    </header>
+
+    <main>
+        <div class="container">
+            <div class="card single-invoice">
+                <div class="card-header">
+                    <i class="fas fa-file-invoice"></i>
+                    <h2>Single Invoice</h2>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="billerGUID">Biller GUID:</label>
+                        <input type="text" id="billerGUID" placeholder="Enter Biller GUID">
+                        <small class="helper-text">Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="webServiceKey">Web Service Key:</label>
+                        <input type="text" id="webServiceKey" placeholder="Enter Web Service Key">
+                        <small class="helper-text">Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="invoiceNumber">Invoice Number:</label>
+                        <input type="text" id="invoiceNumber" placeholder="Enter Invoice Number">
+                    </div>
+                    <div class="save-credentials">
+                        <input type="checkbox" id="saveCredentials">
+                        <label for="saveCredentials">Save credentials for future use</label>
+                    </div>
+                    <button id="processSingleBtn" onclick="processSingleInvoice()">
+                        <i class="fas fa-sync"></i> Process Invoice
+                    </button>
+                </div>
+                <div id="singleResult" class="result-container hidden"></div>
+            </div>
+
+            <div class="card batch-processing">
+                <div class="card-header">
+                    <i class="fas fa-file-csv"></i>
+                    <h2>Batch Processing</h2>
+                </div>
+                <div class="card-body">
+                    <div class="csv-upload">
+                        <div class="drop-area" id="dropArea">
+                            <p>Drag & drop your CSV file here</p>
+                            <p>or</p>
+                            <label for="csvFileInput" class="file-input-label">
+                                <i class="fas fa-upload"></i> Select CSV File
+                            </label>
+                            <input type="file" id="csvFileInput" accept=".csv" hidden>
+                        </div>
+                        <div id="fileInfo" class="file-info hidden"></div>
+                    </div>
+                    <div class="csv-format">
+                        <h3>CSV Format:</h3>
+                        <p>Your CSV should have 3 columns: BillerGUID, WebServiceKey, InvoiceNumber</p>
+                        <a href="#" id="downloadTemplate">Download Template</a>
+                    </div>
+                    <button id="processCSVBtn" class="disabled" disabled>
+                        <i class="fas fa-cogs"></i> Process CSV
+                    </button>
+                </div>
+                <div id="batchProgress" class="progress-container hidden">
+                    <p>Processing <span id="currentProgress">0</span> of <span id="totalItems">0</span> invoices</p>
+                    <div class="progress-bar">
+                        <div class="progress" id="progressBar"></div>
+                    </div>
+                </div>
+                <div id="results" class="result-container hidden"></div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Invoice Balance Refresher | <a href="#" id="showHistory">View History</a></p>
+    </footer>
+
+    <div id="historyModal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Processing History</h2>
+            <div id="historyContent"></div>
+        </div>
+    </div>
+
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <p>Processing request...</p>
+    </div>
+
+    <script src="scripts/script.js"></script>
+</body>
+</html>
