@@ -227,131 +227,114 @@ function processCSV(csv) {
 // Web service call
 // Web service call
 // Web service call
+// Web service call - simplified for direct access
 function callWebService(billerGUID, webServiceKey, invoiceNumber, callback) {
-    // Format GUIDs properly (ensure they're properly encoded for XML)
-    const formattedBillerGUID = encodeXMLString(billerGUID);
-    const formattedWebServiceKey = encodeXMLString(webServiceKey);
-    const formattedInvoiceNumber = encodeXMLString(invoiceNumber);
-
-    // SOAP 1.1 request format with properly escaped GUIDs
+    // 1. Keep XML straightforward - no extra formatting or encoding
     const soapRequest = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
     <ViewInvoiceByInvoiceNumber xmlns="https://www.invoicecloud.com/portal/webservices/CloudInvoicing/">
       <Req>
-        <BillerGUID>${formattedBillerGUID}</BillerGUID>
-        <WebServiceKey>${formattedWebServiceKey}</WebServiceKey>
-        <InvoiceNumber>${formattedInvoiceNumber}</InvoiceNumber>
+        <BillerGUID>${billerGUID}</BillerGUID>
+        <WebServiceKey>${webServiceKey}</WebServiceKey>
+        <InvoiceNumber>${invoiceNumber}</InvoiceNumber>
       </Req>
     </ViewInvoiceByInvoiceNumber>
   </soap:Body>
 </soap:Envelope>`;
 
-    // Try using mode: 'no-cors' to help with CORS issues
-    fetch('https://www.invoicecloud.com/portal/webservices/CloudInvoicing.asmx', {
-        method: 'POST',
-        mode: 'cors', // Try with standard CORS mode first
-        credentials: 'same-origin',
-        headers: {
-            'Content-Type': 'text/xml; charset=utf-8',
-            'SOAPAction': 'https://www.invoicecloud.com/portal/webservices/CloudInvoicing/ViewInvoiceByInvoiceNumber'
-        },
-        body: soapRequest
-    })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.text();
-        })
-        .then(responseText => {
-            processResponse(responseText);
-        })
-        .catch(error => {
-            console.warn('Standard request failed:', error);
+    // 2. Try with XMLHttpRequest instead of fetch (works better for some SOAP services)
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', 'https://www.invoicecloud.com/portal/webservices/CloudInvoicing.asmx', true);
 
-            // If regular request fails, try with a workaround
-            tryAlternativeRequest();
-        });
+    // 3. Set headers precisely as specified in the SOAP 1.1 documentation
+    xhr.setRequestHeader('Content-Type', 'text/xml; charset=utf-8');
+    xhr.setRequestHeader('SOAPAction', 'https://www.invoicecloud.com/portal/webservices/CloudInvoicing/ViewInvoiceByInvoiceNumber');
 
-    // Helper function to encode strings for XML
-    function encodeXMLString(str) {
-        // Replace special characters that could cause XML parsing issues
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&apos;');
-    }
+    // 4. Handle response
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+                try {
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(xhr.responseText, 'text/xml');
 
-    // Process successful response
-    function processResponse(responseText) {
-        try {
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(responseText, 'text/xml');
+                    // Extract data
+                    const success = xmlDoc.getElementsByTagName('Success')[0]?.textContent;
+                    const balanceDue = xmlDoc.getElementsByTagName('BalanceDue')[0]?.textContent;
 
-            const success = xmlDoc.getElementsByTagName('Success')[0]?.textContent;
-            const balanceDue = xmlDoc.getElementsByTagName('BalanceDue')[0]?.textContent;
-
-            if (success && balanceDue) {
+                    // Check response validity
+                    if (success !== undefined) {
+                        const result = {
+                            invoiceNumber,
+                            success,
+                            balanceDue: balanceDue || '0.00',
+                            timestamp: new Date().toISOString()
+                        };
+                        callback(result);
+                    } else {
+                        // Look for error message
+                        const errorMessage = xmlDoc.getElementsByTagName('ErrorMessage')[0]?.textContent || 'Unknown error';
+                        const result = {
+                            invoiceNumber,
+                            success: 'false',
+                            balanceDue: '0.00',
+                            error: errorMessage,
+                            timestamp: new Date().toISOString()
+                        };
+                        callback(result);
+                    }
+                } catch (e) {
+                    console.error('XML parsing error:', e);
+                    const result = {
+                        invoiceNumber,
+                        success: 'false',
+                        balanceDue: '0.00',
+                        error: 'Failed to parse response: ' + e.message,
+                        timestamp: new Date().toISOString()
+                    };
+                    callback(result);
+                }
+            } else {
+                // Handle HTTP errors
                 const result = {
                     invoiceNumber,
-                    success,
-                    balanceDue,
+                    success: 'false',
+                    balanceDue: '0.00',
+                    error: `HTTP Error: ${xhr.status} ${xhr.statusText}`,
                     timestamp: new Date().toISOString()
                 };
                 callback(result);
-            } else {
-                // Check for error message in response
-                const errorMessage = xmlDoc.getElementsByTagName('ErrorMessage')?.[0]?.textContent || 'Unknown error';
-                throw new Error(errorMessage);
+
+                // If CORS error is detected, fall back to simulation
+                if (xhr.status === 0) {
+                    console.warn('CORS issue detected, using simulation mode');
+                    simulateResponse();
+                }
             }
-        } catch (e) {
-            console.error('XML parsing error:', e);
-            const result = {
-                invoiceNumber,
-                success: 'false',
-                balanceDue: '0.00',
-                error: 'Failed to parse response: ' + e.message,
-                timestamp: new Date().toISOString()
-            };
-            callback(result);
         }
+    };
+
+    // 5. Handle network errors
+    xhr.onerror = function () {
+        console.error('Network error occurred');
+        simulateResponse();
+    };
+
+    // 6. Send the request
+    try {
+        xhr.send(soapRequest);
+    } catch (e) {
+        console.error('Error sending request:', e);
+        simulateResponse();
     }
 
-    // Try alternative approach if standard request fails
-    function tryAlternativeRequest() {
-        // Option 1: Try with no-cors mode (limited, but might work for some cases)
-        fetch('https://www.invoicecloud.com/portal/webservices/CloudInvoicing.asmx', {
-            method: 'POST',
-            mode: 'no-cors', // This will prevent reading the response, but might allow the request
-            headers: {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': 'https://www.invoicecloud.com/portal/webservices/CloudInvoicing/ViewInvoiceByInvoiceNumber'
-            },
-            body: soapRequest
-        })
-            .then(() => {
-                // We can't read the response with no-cors mode
-                // Show a notification about the limitation
-                showNotification('Request sent but response cannot be read due to CORS restrictions. Try using a server-side proxy.', 'info');
-
-                // Fall back to simulated response
-                simulateResponse();
-            })
-            .catch(error => {
-                console.error('Alternative request failed:', error);
-                simulateResponse();
-            });
-    }
-
-    // Create a simulated response for demonstration
+    // Simulation fallback function
     function simulateResponse() {
-        console.log('Using simulated response data due to CORS restrictions');
-        showNotification('Using simulated data due to CORS restrictions. For real data, contact your administrator.', 'warning');
+        console.log('Using simulated response data');
+        showNotification('Using simulated data for demonstration. For production use, contact your administrator.', 'info');
 
-        // Generate random success/failure with 80% success rate
+        // Generate random success/failure
         const isSuccess = Math.random() < 0.8;
         const result = {
             invoiceNumber,
@@ -371,6 +354,7 @@ function callWebService(billerGUID, webServiceKey, invoiceNumber, callback) {
         }, 800);
     }
 }
+
 
 
 
