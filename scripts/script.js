@@ -228,8 +228,9 @@ function processCSV(csv) {
 // Web service call
 // Web service call
 // Web service call - simplified for direct access
+// Web service call - direct implementation without simulation fallbacks
 function callWebService(billerGUID, webServiceKey, invoiceNumber, callback) {
-    // 1. Keep XML straightforward - no extra formatting or encoding
+    // Create the SOAP envelope with precise formatting
     const soapRequest = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
@@ -243,117 +244,78 @@ function callWebService(billerGUID, webServiceKey, invoiceNumber, callback) {
   </soap:Body>
 </soap:Envelope>`;
 
-    // 2. Try with XMLHttpRequest instead of fetch (works better for some SOAP services)
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://www.invoicecloud.com/portal/webservices/CloudInvoicing.asmx', true);
+    // Check if we're running in a development environment
+    const isLocalhost = window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1' ||
+        window.location.hostname === '';
 
-    // 3. Set headers precisely as specified in the SOAP 1.1 documentation
-    xhr.setRequestHeader('Content-Type', 'text/xml; charset=utf-8');
-    xhr.setRequestHeader('SOAPAction', 'https://www.invoicecloud.com/portal/webservices/CloudInvoicing/ViewInvoiceByInvoiceNumber');
+    // For local development, we can use a CORS proxy if needed
+    const apiUrl = isLocalhost ?
+        'https://corsproxy.io/?https://www.invoicecloud.com/portal/webservices/CloudInvoicing.asmx' :
+        'https://www.invoicecloud.com/portal/webservices/CloudInvoicing.asmx';
 
-    // 4. Handle response
-    xhr.onreadystatechange = function () {
-        if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-                try {
-                    const parser = new DOMParser();
-                    const xmlDoc = parser.parseFromString(xhr.responseText, 'text/xml');
-
-                    // Extract data
-                    const success = xmlDoc.getElementsByTagName('Success')[0]?.textContent;
-                    const balanceDue = xmlDoc.getElementsByTagName('BalanceDue')[0]?.textContent;
-
-                    // Check response validity
-                    if (success !== undefined) {
-                        const result = {
-                            invoiceNumber,
-                            success,
-                            balanceDue: balanceDue || '0.00',
-                            timestamp: new Date().toISOString()
-                        };
-                        callback(result);
-                    } else {
-                        // Look for error message
-                        const errorMessage = xmlDoc.getElementsByTagName('ErrorMessage')[0]?.textContent || 'Unknown error';
-                        const result = {
-                            invoiceNumber,
-                            success: 'false',
-                            balanceDue: '0.00',
-                            error: errorMessage,
-                            timestamp: new Date().toISOString()
-                        };
-                        callback(result);
-                    }
-                } catch (e) {
-                    console.error('XML parsing error:', e);
-                    const result = {
-                        invoiceNumber,
-                        success: 'false',
-                        balanceDue: '0.00',
-                        error: 'Failed to parse response: ' + e.message,
-                        timestamp: new Date().toISOString()
-                    };
-                    callback(result);
-                }
-            } else {
-                // Handle HTTP errors
-                const result = {
-                    invoiceNumber,
-                    success: 'false',
-                    balanceDue: '0.00',
-                    error: `HTTP Error: ${xhr.status} ${xhr.statusText}`,
-                    timestamp: new Date().toISOString()
-                };
-                callback(result);
-
-                // If CORS error is detected, fall back to simulation
-                if (xhr.status === 0) {
-                    console.warn('CORS issue detected, using simulation mode');
-                    simulateResponse();
-                }
+    // Make the SOAP request
+    fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/xml; charset=utf-8',
+            'SOAPAction': 'https://www.invoicecloud.com/portal/webservices/CloudInvoicing/ViewInvoiceByInvoiceNumber',
+        },
+        body: soapRequest
+    })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Server returned: ${response.status} ${response.statusText}`);
             }
-        }
-    };
+            return response.text();
+        })
+        .then(xmlString => {
+            // Parse the XML response
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlString, 'text/xml');
 
-    // 5. Handle network errors
-    xhr.onerror = function () {
-        console.error('Network error occurred');
-        simulateResponse();
-    };
+            // Extract the response data
+            const success = xmlDoc.getElementsByTagName('Success')[0]?.textContent || 'false';
+            const balanceDue = xmlDoc.getElementsByTagName('BalanceDue')[0]?.textContent || '0.00';
+            const errorMessage = xmlDoc.getElementsByTagName('ErrorMessage')[0]?.textContent || '';
 
-    // 6. Send the request
-    try {
-        xhr.send(soapRequest);
-    } catch (e) {
-        console.error('Error sending request:', e);
-        simulateResponse();
-    }
+            // Create the result object
+            const result = {
+                invoiceNumber,
+                success,
+                balanceDue,
+                error: errorMessage,
+                timestamp: new Date().toISOString()
+            };
 
-    // Simulation fallback function
-    function simulateResponse() {
-        console.log('Using simulated response data');
-        showNotification('Using simulated data for demonstration. For production use, contact your administrator.', 'info');
-
-        // Generate random success/failure
-        const isSuccess = Math.random() < 0.8;
-        const result = {
-            invoiceNumber,
-            success: isSuccess ? 'true' : 'false',
-            balanceDue: isSuccess ? (Math.random() * 1000).toFixed(2) : '0.00',
-            timestamp: new Date().toISOString(),
-            simulated: true
-        };
-
-        if (!isSuccess) {
-            result.error = 'Simulated error response';
-        }
-
-        // Add a delay to simulate network request
-        setTimeout(() => {
+            // Return the result to the callback
             callback(result);
-        }, 800);
-    }
+        })
+        .catch(error => {
+            console.error('SOAP Request Error:', error);
+
+            if (error.message.includes('CORS') || error.message.includes('Failed to fetch')) {
+                // CORS specific error - provide a clear message
+                showNotification(
+                    'Cross-Origin Request Blocked: This application must be hosted on a server that can access the invoice service. ' +
+                    'Contact your system administrator to configure proper access.',
+                    'error'
+                );
+            }
+
+            // Return error to callback
+            const result = {
+                invoiceNumber,
+                success: 'false',
+                balanceDue: '0.00',
+                error: `API connection failed: ${error.message}`,
+                timestamp: new Date().toISOString()
+            };
+
+            callback(result);
+        });
 }
+
 
 
 
